@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.12)
-project(pg_service_template CXX)
+project(yet_another_disk CXX)
 
 include(third_party/userver/cmake/SetupEnvironment.cmake)
 include(GNUInstallDirs)
@@ -44,8 +44,8 @@ if(DEFINED ENV{PREFIX})
 	set(CMAKE_INSTALL_PREFIX ${PREFIX_PATH})
 endif()
 
-set(CONFIG_VAR_PATH ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_SYSCONFDIR}/${PROJECT_NAME}/config_vars.yaml)
-set(CONFIG_FALLBACK_PATH ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_SYSCONFDIR}/${PROJECT_NAME}/dynamic_config_fallback.json)
+set(CONFIG_VAR_PATH ${CMAKE_CURRENT_SOURCE_DIR}/configs/config_vars.yaml)
+set(CONFIG_FALLBACK_PATH ${CMAKE_CURRENT_SOURCE_DIR}/configs/dynamic_config_fallback.json)
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/configs/static_config.yaml.in ${CMAKE_CURRENT_SOURCE_DIR}/configs/static_config.yaml)
 

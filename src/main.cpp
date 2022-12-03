@@ -7,14 +7,14 @@
 
 #include "hello.hpp"
 
-int main(int argc, char* argv[]) {
-  auto component_list = userver::components::MinimalServerComponentList()
-                            .Append<userver::server::handlers::Ping>()
-                            .Append<userver::components::TestsuiteSupport>()
-                            .Append<userver::components::HttpClient>()
-                            .Append<userver::server::handlers::TestsControl>();
+int main(int argc, char *argv[]) {
+    auto component_list = userver::components::MinimalServerComponentList()
+            .Append<userver::server::handlers::Ping>()
+            .Append<userver::components::TestsuiteSupport>()
+            .Append<userver::components::HttpClient>()
+            .Append<userver::server::handlers::TestsControl>();
 
-  pg_service_template::AppendHello(component_list);
+    yet_another_disk::AppendService(component_list);
 
-  return userver::utils::DaemonMain(argc, argv, component_list);
+    return userver::utils::DaemonMain(argc, argv, component_list);
 }
