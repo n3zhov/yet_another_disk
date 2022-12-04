@@ -9,7 +9,6 @@
 #include <userver/utils/datetime/date.hpp>
 #include <userver/utils/assert.hpp>
 #include <boost/algorithm/string.hpp>
-using namespace userver;
 namespace yet_another_disk {
 
     namespace {
@@ -20,16 +19,14 @@ namespace yet_another_disk {
         std::optional<std::map<std::string, formats::json::Value>> GetJsonArgs(
                 const std::string &request);
 
-        bool CheckImport(const formats::json::Value &elem,
+        std::optional<storages::postgres::ResultSet> CheckImport(const formats::json::Value &elem,
                          storages::postgres::Transaction &trx);
 
-        bool CheckFile(const formats::json::Value &elem,
-                         storages::postgres::Transaction &trx);
+        bool CheckFile(const formats::json::Value &elem);
 
-        bool CheckFolder(const formats::json::Value &elem,
-                       storages::postgres::Transaction &trx);
+        bool CheckFolder(const formats::json::Value &elem);
 
-        std::string getTypeById(const std::string &name,
+        storages::postgres::ResultSet getItemById(const std::string &name,
                          storages::postgres::Transaction &trx);
 
         class Imports final : public server::handlers::HttpHandlerBase {
@@ -172,61 +169,79 @@ namespace yet_another_disk {
             }
         }
 
-        bool CheckImport(const formats::json::Value &elem,
+        std::optional<storages::postgres::ResultSet> CheckImport(const formats::json::Value &elem,
                       storages::postgres::Transaction &trx){
             const auto name = elem["id"].As<std::string>("");
             const auto importType = elem["type"].As<std::string>("");
             if(name.empty() || importType.empty()){
-                return false;
+                return {};
             }
 
-            std::string type = getTypeById(name, trx);
-
+            auto getItemType = [](const storages::postgres::ResultSet &arg){
+                if(!arg.IsEmpty() && !arg[0]["item_type"].IsNull())
+                    return arg[0]["item_type"].As<std::string>();
+                else
+                    return std::string();
+            };
+            auto res = getItemById(name, trx);
+            std::string type = getItemType(res);
             if(!type.empty() && type != importType){
-                return false;
+                return {};
             }
 
             const auto parentId = elem["parentId"].As<std::string>("");
-            if(!parentId.empty() && getTypeById(parentId, trx) != kFolder){
-                return false;
+            auto parentRes = getItemById(parentId, trx);
+            std::string parent_type = getItemType(parentRes);
+            if(!parentId.empty() && parent_type != kFolder){
+                return {};
             }
             if(importType == kFolder){
-                return CheckFolder(elem, trx);
+                if(CheckFolder(elem))
+                    return res;
+                else
+                    return {};
             }
             else if(importType == kFile){
-                return CheckFile(elem, trx);
+                if(CheckFile(elem))
+                    return res;
+                else
+                    return {};
+            }
+            else{
+                return {};
+            }
+        }
+
+        bool CheckFile(const formats::json::Value &elem){
+            const auto url = elem["url"].As<std::string>("");
+            const int size = elem["size"].As<int>(-1);
+            if(!url.empty() && url.size() <= 255 && size > 0){
+                return true;
             }
             else{
                 return false;
             }
         }
 
-        bool CheckFile(const formats::json::Value &elem,
-                       storages::postgres::Transaction &trx){
-
+        bool CheckFolder(const formats::json::Value &elem){
+            if(elem["size"].IsEmpty() && elem["url"].IsEmpty()){
+                return true;
+            }
+            else{
+                return false;
+            }
         }
 
-        bool CheckFolder(const formats::json::Value &elem,
-                         storages::postgres::Transaction &trx){
 
-        }
-
-
-        std::string getTypeById(const std::string &name,
+        storages::postgres::ResultSet getItemById(const std::string &name,
                                 storages::postgres::Transaction &trx){
-            const std::string& queryCheck = "SELECT\n"
-                                            "\tid, item_type\n"
+            const std::string& query = "SELECT\n"
+                                            "\tid, item_type, item_size, parent_id\n"
                                             "FROM\n"
                                             "\tyet_another_disk.system_items s\n"
                                             "WHERE\n"
                                             "    id=$1;";
-            auto res = trx.Execute(queryCheck, name);
-            std::string type;
-            if(!res.IsEmpty()){
-                type = res[0]["item_type"].As<std::string>();
-                boost::algorithm::trim_right(type);
-            }
-            return type;
+            return trx.Execute(query, name);
         }
     }  // namespace
 
