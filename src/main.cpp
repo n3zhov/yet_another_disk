@@ -5,7 +5,7 @@
 #include <userver/testsuite/testsuite_support.hpp>
 #include <userver/utils/daemon_run.hpp>
 
-#include "hello.hpp"
+#include "handlers.hpp"
 
 int main(int argc, char *argv[]) {
     auto component_list = userver::components::MinimalServerComponentList()
