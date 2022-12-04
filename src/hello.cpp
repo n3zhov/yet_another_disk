@@ -247,7 +247,7 @@ namespace yet_another_disk {
         }
 
         bool CheckFolder(const formats::json::Value &elem){
-            if(elem["size"].IsEmpty() && elem["url"].IsEmpty()){
+            if(elem["size"].IsMissing() && elem["url"].IsMissing()){
                 return true;
             }
             else{
@@ -278,7 +278,7 @@ namespace yet_another_disk {
         storages::postgres::ResultSet getItemById(const std::string &id,
                                 storages::postgres::Transaction &trx){
             const static std::string& query = "SELECT\n"
-                                            "\tid, item_type, item_size, parent_id, url, \"date-time\"\n"
+                                            "\ts.id, s.item_type, s.item_size, s.parent_id, s.url, s.\"date-time\"\n"
                                             "FROM\n"
                                             "\tyet_another_disk.system_items s\n"
                                             "WHERE\n"
