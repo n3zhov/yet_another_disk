@@ -9,6 +9,7 @@
 #include <userver/utils/datetime/date.hpp>
 #include <userver/utils/assert.hpp>
 #include <boost/algorithm/string.hpp>
+
 namespace yet_another_disk {
 
     namespace {
@@ -26,8 +27,15 @@ namespace yet_another_disk {
 
         bool CheckFolder(const formats::json::Value &elem);
 
-        storages::postgres::ResultSet getItemById(const std::string &name,
+        storages::postgres::ResultSet getItemById(const std::string &id,
                          storages::postgres::Transaction &trx);
+
+        void UpdateParentSize(const std::string &id, long long changeSize,
+                              storages::postgres::Transaction &trx);
+
+        void InsertItem(const formats::json::Value &elem,
+                        const userver::storages::postgres::TimePointTz &date,
+                        storages::postgres::Transaction &trx);
 
         class Imports final : public server::handlers::HttpHandlerBase {
         public:
@@ -51,16 +59,31 @@ namespace yet_another_disk {
                 auto parsed = GetJsonArgs(body);
                 if (parsed.has_value()) {
                     auto &args = parsed.value();
+                    const auto date = args["updateDate"].As<storages::postgres::TimePointTz>();
                     auto trx = pg_cluster_->Begin(userver::storages::postgres::TransactionOptions{});
                     for(auto &elem: args["items"]){
-                        CheckImport(elem, trx);
+                        auto prevValue = CheckImport(elem, trx);
+                        if(!prevValue.has_value()){
+                            request.SetResponseStatus(server::http::HttpStatus::kBadRequest);
+                            return {};
+                        }
+                        else{
+                            const auto &prevElem = prevValue.value();
+                            if(!prevElem.IsEmpty() && !prevElem[0]["parent_id"].IsNull()){
+                                UpdateParentSize(
+                                        boost::algorithm::trim_right_copy(prevElem[0]["parent_id"].As<std::string>()),
+                                        -prevElem[0]["item_size"].As<long long>(), trx);
+                            }
+                            InsertItem(elem, date, trx);
+                        }
                     }
                     trx.Commit();
+                    request.SetResponseStatus(server::http::HttpStatus::kOk);
+                    return {};
                 } else {
                     request.SetResponseStatus(server::http::HttpStatus::kBadRequest);
+                    return {};
                 }
-
-                return {};
             }
 
             std::string query =
@@ -179,7 +202,7 @@ namespace yet_another_disk {
 
             auto getItemType = [](const storages::postgres::ResultSet &arg){
                 if(!arg.IsEmpty() && !arg[0]["item_type"].IsNull())
-                    return arg[0]["item_type"].As<std::string>();
+                    return boost::algorithm::trim_right_copy(arg[0]["item_type"].As<std::string>());
                 else
                     return std::string();
             };
@@ -232,16 +255,76 @@ namespace yet_another_disk {
             }
         }
 
+        void UpdateParentSize(const std::string &id, const long long changeSize,
+                              storages::postgres::Transaction &trx){
+            const static std::string updateQuery = "WITH RECURSIVE r AS (\n"
+                                                   "   SELECT id, parent_id, item_size, item_type\n"
+                                                   "   FROM yet_another_disk.system_items\n"
+                                                   "   WHERE id = $1\n"
+                                                   "   UNION\n"
+                                                   "   SELECT items.id, items.parent_id, items.item_size, items.item_type\n"
+                                                   "   FROM yet_another_disk.system_items as items\n"
+                                                   "      JOIN r\n"
+                                                   "          ON items.id = r.parent_id\n"
+                                                   ")\n"
+                                                   "UPDATE yet_another_disk.system_items items\n"
+                                                   "    SET item_size = item_size + $2\n"
+                                                   "    WHERE items.id in (SELECT id FROM r) ;";
 
-        storages::postgres::ResultSet getItemById(const std::string &name,
+
+            trx.Execute(updateQuery, id, changeSize);
+        }
+
+        storages::postgres::ResultSet getItemById(const std::string &id,
                                 storages::postgres::Transaction &trx){
-            const std::string& query = "SELECT\n"
-                                            "\tid, item_type, item_size, parent_id\n"
+            const static std::string& query = "SELECT\n"
+                                            "\tid, item_type, item_size, parent_id, url, \"date-time\"\n"
                                             "FROM\n"
                                             "\tyet_another_disk.system_items s\n"
                                             "WHERE\n"
                                             "    id=$1;";
-            return trx.Execute(query, name);
+            return trx.Execute(query, id);
+        }
+
+        void InsertItem(const formats::json::Value &elem,
+                        const userver::storages::postgres::TimePointTz &date,
+                        storages::postgres::Transaction &trx){
+            const static std::string insertItem = "INSERT INTO yet_another_disk.system_items\n"
+                                                  "\t( id, url, parent_id, item_type, item_size, \"date-time\") "
+                                                  "VALUES ( $1, $2, $3, $4, $5, $6)\n"
+                                                  "ON CONFLICT (id) DO UPDATE\n"
+                                                  "    SET id=excluded.id,\n"
+                                                  "           url=excluded.url,\n"
+                                                  "           parent_id=excluded.parent_id,\n"
+                                                  "           item_type=excluded.item_type,\n"
+                                                  "           item_size=excluded.item_size,\n"
+                                                  "           \"date-time\"=excluded.\"date-time\"";
+            const static std::string insertStory = "INSERT INTO yet_another_disk.history\n"
+                                                   "\t( item_id, url, parent_id, item_type, item_size, \"date-time\") "
+                                                   "VALUES ( $1, $2, $3, $4, $5, $6 );";
+            
+            const auto type = elem["type"].As<std::string>();
+
+            auto execLambda = [date](const std::string &query,
+                                const formats::json::Value &elem,
+                                storages::postgres::Transaction &trx){
+                trx.Execute(query, elem["id"].As<std::string>(), elem["url"].As<std::string>(""),
+                            elem["parentId"].As<std::string>(""), elem["type"].As<std::string>(""),
+                            elem["size"].As<long long>(0),
+                            date);
+            };
+
+            execLambda(insertItem, elem, trx);
+            if(elem["type"].As<std::string>() == kFile){
+                execLambda(insertStory, elem, trx);
+                const auto parent = elem["parentId"].As<std::string>("");
+                if(!parent.empty()){
+                    UpdateParentSize(parent, elem["size"].As<long long>(), trx);
+                }
+            }
+
+
+
         }
     }  // namespace
 
