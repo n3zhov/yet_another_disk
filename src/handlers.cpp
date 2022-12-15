@@ -85,7 +85,6 @@ namespace yet_another_disk {
         formats::json::Value HandleRequestJsonThrow(
                 const server::http::HttpRequest &request, const formats::json::Value& json,
                 server::request::RequestContext &) const override {
-            auto &response = request.GetHttpResponse();
             const std::string id = request.GetPathArg("id");
             const auto uId = uuidGen(id);
             auto trx = pg_cluster_->Begin(userver::storages::postgres::TransactionOptions{});
@@ -94,18 +93,10 @@ namespace yet_another_disk {
                 return res.value();
             }
             else {
-                request.SetResponseStatus(server::http::HttpStatus::kNotFound);
-                return formats::json::MakeObject(
-                        "code", 404,
-                        "message", "Item not found"
-                        );
+                return notFound(request);
             }
         }
 
-        std::string query =
-                "INSERT INTO warehouse.socks ( type_id, color, cotton_part, quantity) "
-                "VALUES ( $1, $2, $3, $4 ) ON CONFLICT (type_id) DO UPDATE\n"
-                "SET quantity=socks.quantity - excluded.quantity";
         storages::postgres::ClusterPtr pg_cluster_;
     };
 
@@ -124,26 +115,19 @@ namespace yet_another_disk {
         formats::json::Value HandleRequestJsonThrow(
                 const server::http::HttpRequest &request, const formats::json::Value& json,
                 server::request::RequestContext &) const override {
-            auto parsed = getJsonArgs(json);
-            if (parsed.has_value()) {
-                auto &args = parsed.value();
-                pg_cluster_->Execute(
-                        storages::postgres::ClusterHostType::kMaster, query,
-                        args["color"].As<std::string>() +
-                        std::to_string(args["cottonPart"].As<int>()),
-                        args["color"].As<std::string>(), args["cottonPart"].As<int>(),
-                        args["quantity"].As<int>());
-            } else {
-                request.SetResponseStatus(server::http::HttpStatus::kBadRequest);
+            const std::string id = request.GetPathArg("id");
+            const auto uId = uuidGen(id);
+            auto trx = pg_cluster_->Begin(userver::storages::postgres::TransactionOptions{});
+            auto res = getItemById(uId, trx);
+            if(!res.IsEmpty()) {
+                deleteElemById(uId, trx);
+                trx.Commit();
+                return {};
             }
-
-            return {};
+            else{
+                return notFound(request);
+            }
         }
-
-        std::string query =
-                "INSERT INTO warehouse.socks ( type_id, color, cotton_part, quantity) "
-                "VALUES ( $1, $2, $3, $4 ) ON CONFLICT (type_id) DO UPDATE\n"
-                "SET quantity=socks.quantity - excluded.quantity";
         storages::postgres::ClusterPtr pg_cluster_;
     };
 
@@ -385,10 +369,18 @@ namespace yet_another_disk {
     void createOptional (const storages::postgres::Field &elem, std::optional<T> &res){
         if(elem.IsNull())
             res = std::nullopt;
-        if(std::is_same<T, std::string>())
+        else if(std::is_same<T, std::string>())
             res = getStringFromField(elem);
         else
             res = elem.As<T>();
+    }
+
+    formats::json::Value notFound(const server::http::HttpRequest &request){
+        request.SetResponseStatus(server::http::HttpStatus::kNotFound);
+        return formats::json::MakeObject(
+                "code", 404,
+                "message", "Item not found"
+        );
     }
 
     void AppendService(components::ComponentList &component_list) {
@@ -397,6 +389,23 @@ namespace yet_another_disk {
         component_list.Append<Imports>();
         component_list.Append<Nodes>();
         component_list.Append<Delete>();
+    }
+
+    void deleteElemById(const boost::uuids::uuid &id, storages::postgres::Transaction &trx) {
+        const std::string query = "WITH RECURSIVE r AS (\n"
+                                  "   SELECT *\n"
+                                  "   FROM yet_another_disk.system_items\n"
+                                  "   WHERE id = $1\n"
+                                  "   UNION\n"
+                                  "   SELECT items.*\n"
+                                  "   FROM yet_another_disk.system_items as items\n"
+                                  "      JOIN r\n"
+                                  "          ON items.parent_id = r.id\n"
+                                  ")\n"
+                                  "DELETE\n"
+                                  "FROM yet_another_disk.system_items\n"
+                                  "WHERE id IN (SELECT id FROM r);";
+        trx.Execute(query, id);
     }
 
 }  // namespace yet_another_disk

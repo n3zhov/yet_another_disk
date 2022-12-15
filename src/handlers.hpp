@@ -54,6 +54,11 @@ namespace yet_another_disk {
     template <typename T>
     void createOptional (const storages::postgres::Field &elem, std::optional<T> &res);
 
+    formats::json::Value notFound(const server::http::HttpRequest &request);
+
+    void deleteElemById(const boost::uuids::uuid &id,
+                                              storages::postgres::Transaction &trx);
+
     void AppendService(userver::components::ComponentList &component_list);
 
 }  // namespace yet_another_disk
