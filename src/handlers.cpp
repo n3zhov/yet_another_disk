@@ -14,44 +14,48 @@
 
 namespace yet_another_disk {
 
-    class Imports final : public server::handlers::HttpHandlerBase {
+    class Imports final : public server::handlers::HttpHandlerJsonBase {
     public:
         static constexpr std::string_view kName = "handler-imports";
 
         Imports(const components::ComponentConfig &config,
                 const components::ComponentContext &component_context)
-                : HttpHandlerBase(config, component_context),
+                : HttpHandlerJsonBase(config, component_context),
                   pg_cluster_(
                           component_context
                                   .FindComponent<components::Postgres>("postgres-db-1")
                                   .GetCluster()) {}
 
-        std::string HandleRequestThrow(
-                const server::http::HttpRequest &request,
+        formats::json::Value HandleRequestJsonThrow(
+                const server::http::HttpRequest &request, const formats::json::Value& json,
                 server::request::RequestContext &) const override {
-            auto &response = request.GetHttpResponse();
 
-            response.SetContentType("text/plain");
-            const std::string &body = request.RequestBody();
-            auto parsed = GetJsonArgs(body);
+            auto parsed = getJsonArgs(json);
+            auto validationFailed = [&request](){
+                request.SetResponseStatus(userver::server::http::HttpStatus::kBadRequest);
+                return formats::json::MakeObject(
+                        "code", 400,
+                        "message", "Validation failed"
+                );
+            };
+
             if (parsed.has_value()) {
                 auto &args = parsed.value();
                 const auto date = args["updateDate"].As<storages::postgres::TimePointTz>();
                 auto trx = pg_cluster_->Begin(userver::storages::postgres::TransactionOptions{});
                 for (auto &elem: args["items"]) {
-                    auto prevValue = CheckImport(elem, trx);
+                    auto prevValue = checkImport(elem, trx);
                     if (!prevValue.has_value()) {
-                        request.SetResponseStatus(server::http::HttpStatus::kBadRequest);
-                        return {};
+                        return validationFailed();
                     } else {
                         const auto &prevElem = prevValue.value();
                         if (!prevElem.IsEmpty() && !prevElem[0]["parent_id"].IsNull()) {
                             const auto parentId = uuidGen(getStringFromField(prevElem[0]["parent_id"]));
-                            UpdateParentSize(
+                            updateParentSize(
                                     parentId,
                                     -prevElem[0]["item_size"].As<long long>(), trx);
                         }
-                        InsertItem(elem, date, trx);
+                        insertItem(elem, date, trx);
                     }
                 }
                 trx.Commit();
@@ -59,7 +63,7 @@ namespace yet_another_disk {
                 return {};
             } else {
                 request.SetResponseStatus(server::http::HttpStatus::kBadRequest);
-                return {};
+                return validationFailed();
             }
         }
 
@@ -82,7 +86,6 @@ namespace yet_another_disk {
                 const server::http::HttpRequest &request, const formats::json::Value& json,
                 server::request::RequestContext &) const override {
             auto &response = request.GetHttpResponse();
-            std::string requestPath = request.GetUrl();
             const std::string id = request.GetPathArg("id");
             const auto uId = uuidGen(id);
             auto trx = pg_cluster_->Begin(userver::storages::postgres::TransactionOptions{});
@@ -91,8 +94,11 @@ namespace yet_another_disk {
                 return res.value();
             }
             else {
-                request.SetResponseStatus(server::http::HttpStatus::kBadRequest);
-                return {};
+                request.SetResponseStatus(server::http::HttpStatus::kNotFound);
+                return formats::json::MakeObject(
+                        "code", 404,
+                        "message", "Item not found"
+                        );
             }
         }
 
@@ -103,26 +109,22 @@ namespace yet_another_disk {
         storages::postgres::ClusterPtr pg_cluster_;
     };
 
-    class Delete final : public server::handlers::HttpHandlerBase {
+    class Delete final : public server::handlers::HttpHandlerJsonBase {
     public:
         static constexpr std::string_view kName = "handler-delete";
 
         Delete(const components::ComponentConfig &config,
                const components::ComponentContext &component_context)
-                : HttpHandlerBase(config, component_context),
+                : HttpHandlerJsonBase(config, component_context),
                   pg_cluster_(
                           component_context
                                   .FindComponent<components::Postgres>("postgres-db-1")
                                   .GetCluster()) {}
 
-        std::string HandleRequestThrow(
-                const server::http::HttpRequest &request,
+        formats::json::Value HandleRequestJsonThrow(
+                const server::http::HttpRequest &request, const formats::json::Value& json,
                 server::request::RequestContext &) const override {
-            auto &response = request.GetHttpResponse();
-
-            response.SetContentType("text/plain");
-            const std::string &body = request.RequestBody();
-            auto parsed = GetJsonArgs(body);
+            auto parsed = getJsonArgs(json);
             if (parsed.has_value()) {
                 auto &args = parsed.value();
                 pg_cluster_->Execute(
@@ -145,11 +147,9 @@ namespace yet_another_disk {
         storages::postgres::ClusterPtr pg_cluster_;
     };
 
-    std::optional<std::map<std::string, formats::json::Value>> GetJsonArgs(
-            const std::string &request) {
+    std::optional<std::map<std::string, formats::json::Value>> getJsonArgs(
+            const formats::json::Value &request_json) {
         try {
-            const auto &request_json = formats::json::FromString(request);
-            //utils::datetime::
             std::map<std::string, formats::json::Value> res;
             res["updateDate"] = request_json["updateDate"];
             res["items"] = request_json["items"];
@@ -159,7 +159,7 @@ namespace yet_another_disk {
         }
     }
 
-    std::optional<storages::postgres::ResultSet> CheckImport(const formats::json::Value &elem,
+    std::optional<storages::postgres::ResultSet> checkImport(const formats::json::Value &elem,
                                                              storages::postgres::Transaction &trx) {
         const auto name = elem["id"].As<std::string>("");
         const auto importType = elem["type"].As<std::string>("");
@@ -187,12 +187,12 @@ namespace yet_another_disk {
             return {};
         }
         if (importType == kFolder) {
-            if (CheckFolder(elem))
+            if (checkFolder(elem))
                 return res;
             else
                 return {};
         } else if (importType == kFile) {
-            if (CheckFile(elem))
+            if (checkFile(elem))
                 return res;
             else
                 return {};
@@ -201,7 +201,7 @@ namespace yet_another_disk {
         }
     }
 
-    bool CheckFile(const formats::json::Value &elem) {
+    bool checkFile(const formats::json::Value &elem) {
         const auto url = elem["url"].As<std::string>("");
         const int size = elem["size"].As<int>(-1);
         if (!url.empty() && url.size() <= 255 && size > 0) {
@@ -211,7 +211,7 @@ namespace yet_another_disk {
         }
     }
 
-    bool CheckFolder(const formats::json::Value &elem) {
+    bool checkFolder(const formats::json::Value &elem) {
         if (elem["size"].IsMissing() && elem["url"].IsMissing()) {
             return true;
         } else {
@@ -219,7 +219,7 @@ namespace yet_another_disk {
         }
     }
 
-    void UpdateParentSize(const boost::uuids::uuid &id, const long long changeSize,
+    void updateParentSize(const boost::uuids::uuid &id, long long changeSize,
                           storages::postgres::Transaction &trx) {
         const static std::string updateQuery = "WITH RECURSIVE r AS (\n"
                                                "   SELECT id, parent_id, item_size, item_type\n"
@@ -250,7 +250,7 @@ namespace yet_another_disk {
         return trx.Execute(query, id);
     }
 
-    void InsertItem(const formats::json::Value &elem,
+    void insertItem(const formats::json::Value &elem,
                     const userver::storages::postgres::TimePointTz &date,
                     storages::postgres::Transaction &trx) {
         const static std::string insertItem = "INSERT INTO yet_another_disk.system_items\n"
@@ -281,7 +281,7 @@ namespace yet_another_disk {
 
         std::optional<std::string> url = elem["url"].As<std::string>("");
         if(url.value().empty())
-            url.reset();
+            url = std::nullopt;
         const auto itemSize = elem["size"].As<long long>(0);
 
         trx.Execute(insertItem, id, parentId, uId, url,
@@ -289,7 +289,7 @@ namespace yet_another_disk {
         if (elem["type"].As<std::string>() == kFile) {
             trx.Execute(insertStory, uId, url, uParent, date);
             if (!parent.empty()) {
-                UpdateParentSize(uParent.value(), itemSize, trx);
+                updateParentSize(uParent.value(), itemSize, trx);
             }
         }
     }
@@ -360,15 +360,6 @@ namespace yet_another_disk {
         auto dateToParse = datePg.GetUnderlying();
         const auto date = utils::datetime::LocalTimezoneTimestring(dateToParse);
 
-        auto createOptional = []<class T>(const storages::postgres::Field &elem, std::optional<T> &res){
-            if(elem.IsNull())
-                res = std::nullopt;
-            if(std::is_same<T, std::string>())
-                res = getStringFromField(elem);
-            else
-                res = elem.As<T>();
-        };
-
         std::optional<std::string> url;
         createOptional(row["url"], url);
 
@@ -388,6 +379,16 @@ namespace yet_another_disk {
             jsonRes["children"] = nlohmann::json::array();
 
         return jsonRes;
+    }
+
+    template <typename T>
+    void createOptional (const storages::postgres::Field &elem, std::optional<T> &res){
+        if(elem.IsNull())
+            res = std::nullopt;
+        if(std::is_same<T, std::string>())
+            res = getStringFromField(elem);
+        else
+            res = elem.As<T>();
     }
 
     void AppendService(components::ComponentList &component_list) {

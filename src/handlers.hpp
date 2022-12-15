@@ -22,14 +22,14 @@ namespace yet_another_disk {
     const boost::uuids::name_generator uuidGen(boost::uuids::ns::x500dn());
 
 
-    bool CheckFile(const formats::json::Value &elem);
+    bool checkFile(const formats::json::Value &elem);
 
-    bool CheckFolder(const formats::json::Value &elem);
+    bool checkFolder(const formats::json::Value &elem);
 
-    std::optional<std::map<std::string, formats::json::Value>> GetJsonArgs(
-            const std::string &request);
+    std::optional<std::map<std::string, formats::json::Value>> getJsonArgs(
+            const formats::json::Value &request_json);
 
-    std::optional<storages::postgres::ResultSet> CheckImport(const formats::json::Value &elem,
+    std::optional<storages::postgres::ResultSet> checkImport(const formats::json::Value &elem,
                                                              storages::postgres::Transaction &trx);
 
     storages::postgres::ResultSet getItemById(const boost::uuids::uuid &id,
@@ -42,14 +42,17 @@ namespace yet_another_disk {
 
     nlohmann::json parseRow(const storages::postgres::Row &row);
 
-    void UpdateParentSize(const boost::uuids::uuid &id, long long changeSize,
+    void updateParentSize(const boost::uuids::uuid &id, long long changeSize,
                           storages::postgres::Transaction &trx);
 
-    void InsertItem(const formats::json::Value &elem,
+    void insertItem(const formats::json::Value &elem,
                     const userver::storages::postgres::TimePointTz &date,
                     storages::postgres::Transaction &trx);
 
     std::string getStringFromField(const storages::postgres::Field &elem);
+
+    template <typename T>
+    void createOptional (const storages::postgres::Field &elem, std::optional<T> &res);
 
     void AppendService(userver::components::ComponentList &component_list);
 
