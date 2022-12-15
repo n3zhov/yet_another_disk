@@ -354,10 +354,20 @@ namespace yet_another_disk {
                 {"id", id},
                 {"size", size},
                 {"date", date},
-                {"type", type},
-                {"url", url.value()},
-                {"parentId", parentId.value()}
+                {"type", type}
         };
+
+
+        auto addKey = [&jsonRes]<class T>(const std::string &key, std::optional<T> opt){
+            if(opt.has_value())
+                jsonRes[key] = opt.value();
+            else
+                jsonRes[key] = nullptr;
+        };
+
+        addKey("parentId", parentId);
+        addKey("url", url);
+
 
         if (type == kFolder)
             jsonRes["children"] = nlohmann::json::array();
