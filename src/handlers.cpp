@@ -51,9 +51,9 @@ namespace yet_another_disk {
                         const auto &prevElem = prevValue.value();
                         if (!prevElem.IsEmpty() && !prevElem[0]["parent_id"].IsNull()) {
                             const auto parentId = uuidGen(getStringFromField(prevElem[0]["parent_id"]));
-                            updateParentSize(
+                            updateParent(
                                     parentId,
-                                    -prevElem[0]["item_size"].As<long long>(), trx);
+                                    -prevElem[0]["item_size"].As<long long>(), date, trx);
                         }
                         insertItem(elem, date, trx);
                     }
@@ -116,6 +116,15 @@ namespace yet_another_disk {
                 const server::http::HttpRequest &request, const formats::json::Value& json,
                 server::request::RequestContext &) const override {
             const std::string id = request.GetPathArg("id");
+            const auto dateString = request.GetArg("date");
+            if(dateString.empty()){
+                request.SetResponseStatus(userver::server::http::HttpStatus::kBadRequest);
+                return formats::json::MakeObject(
+                        "code", 400,
+                        "message", "Validation failed"
+                );
+            }
+            const auto date = utils::datetime::Stringtime(request.GetArg("date"));
             const auto uId = uuidGen(id);
             auto trx = pg_cluster_->Begin(userver::storages::postgres::TransactionOptions{});
             auto res = getItemById(uId, trx);
@@ -203,8 +212,8 @@ namespace yet_another_disk {
         }
     }
 
-    void updateParentSize(const boost::uuids::uuid &id, long long changeSize,
-                          storages::postgres::Transaction &trx) {
+    void updateParent(const boost::uuids::uuid &id, long long changeSize, storages::postgres::TimePointTz date,
+                      storages::postgres::Transaction &trx) {
         const static std::string updateQuery = "WITH RECURSIVE r AS (\n"
                                                "   SELECT id, parent_id, item_size, item_type\n"
                                                "   FROM yet_another_disk.system_items\n"
@@ -216,11 +225,12 @@ namespace yet_another_disk {
                                                "          ON items.id = r.parent_id\n"
                                                ")\n"
                                                "UPDATE yet_another_disk.system_items items\n"
-                                               "    SET item_size = item_size + $2\n"
+                                               "    SET item_size = item_size + $2,\n"
+                                               "        \"date-time\" = $3\n"
                                                "    WHERE items.id in (SELECT id FROM r) ;";
 
 
-        trx.Execute(updateQuery, id, changeSize);
+        trx.Execute(updateQuery, id, changeSize, date);
     }
 
     storages::postgres::ResultSet getItemById(const boost::uuids::uuid &id,
@@ -272,8 +282,8 @@ namespace yet_another_disk {
                     uParent, type, itemSize, date);
         if (elem["type"].As<std::string>() == kFile) {
             trx.Execute(insertStory, uId, url, uParent, date);
-            if (!parent.empty()) {
-                updateParentSize(uParent.value(), itemSize, trx);
+            if (!parent.empty() && elem["type"].As<std::string>() == kFile) {
+                updateParent(uParent.value(), itemSize, date, trx);
             }
         }
     }
@@ -342,7 +352,7 @@ namespace yet_another_disk {
         const auto datePg = row["date-time"].As<storages::postgres::TimePointTz>();
 
         auto dateToParse = datePg.GetUnderlying();
-        const auto date = utils::datetime::LocalTimezoneTimestring(dateToParse);
+        const auto date = utils::datetime::Timestring(dateToParse);
 
         std::optional<std::string> url;
         createOptional(row["url"], url);
@@ -371,6 +381,8 @@ namespace yet_another_disk {
 
         if (type == kFolder)
             jsonRes["children"] = nlohmann::json::array();
+        else if(type == kFile)
+            jsonRes["children"] = nullptr;
 
         return jsonRes;
     }

@@ -42,8 +42,8 @@ namespace yet_another_disk {
 
     nlohmann::json parseRow(const storages::postgres::Row &row);
 
-    void updateParentSize(const boost::uuids::uuid &id, long long changeSize,
-                          storages::postgres::Transaction &trx);
+    void updateParent(const boost::uuids::uuid &id, long long changeSize, storages::postgres::TimePointTz,
+                      storages::postgres::Transaction &trx);
 
     void insertItem(const formats::json::Value &elem,
                     const userver::storages::postgres::TimePointTz &date,
