@@ -1,13 +1,16 @@
 #include "handlers.hpp"
+#include "userver/formats/json/string_builder.hpp"
+#include "userver/server/handlers/http_handler_json_base.hpp"
 
-#include <fmt/format.h>
+
 
 #include <userver/clients/dns/component.hpp>
 #include <userver/server/handlers/http_handler_base.hpp>
 #include <userver/storages/postgres/cluster.hpp>
 #include <userver/storages/postgres/component.hpp>
-#include <userver/utils/datetime/date.hpp>
+
 #include <boost/algorithm/string.hpp>
+
 
 namespace yet_another_disk {
 
@@ -63,29 +66,34 @@ namespace yet_another_disk {
         storages::postgres::ClusterPtr pg_cluster_;
     };
 
-    class Nodes final : public server::handlers::HttpHandlerBase {
+    class Nodes final : public server::handlers::HttpHandlerJsonBase {
     public:
         static constexpr std::string_view kName = "handler-nodes";
 
         Nodes(const components::ComponentConfig &config,
               const components::ComponentContext &component_context)
-                : HttpHandlerBase(config, component_context),
+                : HttpHandlerJsonBase(config, component_context),
                   pg_cluster_(
                           component_context
                                   .FindComponent<components::Postgres>("postgres-db-1")
                                   .GetCluster()) {}
 
-        std::string HandleRequestThrow(
-                const server::http::HttpRequest &request,
+        formats::json::Value HandleRequestJsonThrow(
+                const server::http::HttpRequest &request, const formats::json::Value& json,
                 server::request::RequestContext &) const override {
             auto &response = request.GetHttpResponse();
-
-            response.SetContentType("text/plain");
-
-            const std::string id = request.GetArg("id");
+            std::string requestPath = request.GetUrl();
+            const std::string id = request.GetPathArg("id");
             const auto uId = uuidGen(id);
-
-            return {};
+            auto trx = pg_cluster_->Begin(userver::storages::postgres::TransactionOptions{});
+            const auto res = getItemAndChildren(uId, id, trx);
+            if(res.has_value()){
+                return res.value();
+            }
+            else {
+                request.SetResponseStatus(server::http::HttpStatus::kBadRequest);
+                return {};
+            }
         }
 
         std::string query =
@@ -296,72 +304,90 @@ namespace yet_another_disk {
     std::optional<formats::json::Value> getItemAndChildren(const boost::uuids::uuid &uid, const std::string &id,
                                                      storages::postgres::Transaction &trx){
         const std::string query = "WITH RECURSIVE r AS (\n"
-                                  "   SELECT *\n"
+                                  "   SELECT *, 1 AS level\n"
                                   "   FROM yet_another_disk.system_items\n"
                                   "   WHERE id = $1\n"
                                   "   UNION\n"
-                                  "   SELECT items.*\n"
+                                  "   SELECT items.*, r.level + 1 AS level\n"
                                   "   FROM yet_another_disk.system_items as items\n"
                                   "      JOIN r\n"
                                   "          ON items.parent_id = r.id\n"
                                   ")\n"
-                                  "SELECT * FROM r;";
+                                  "SELECT * FROM  r\n"
+                                  "ORDER BY item_type DESC, level DESC;";
         auto res = trx.Execute(query, uid);
-        if(!res.IsEmpty())
-            return parseRes(res, id);
+        if(!res.IsEmpty()){
+            auto strJson = parseRes(res, id).dump(4);
+            return formats::json::FromString(strJson);
+        }
         else
             return {};
     }
 
-    formats::json::Value parseRes (const storages::postgres::ResultSet &res, const std::string &resId){
-        std::unordered_map<std::string, formats::json::Value> resultElems;
+    nlohmann::json parseRes (const storages::postgres::ResultSet &res, const std::string &resId){
+        std::unordered_map<std::string, nlohmann::json> resultElems;
+        std::vector<std::string> folderIds;
         for(const auto& elem: res){
-            const auto elemId = elem["id_string"].As<std::string>();
-            resultElems[elemId] = parseRow(elem);
+            const auto elemId = getStringFromField(elem["id_string"]);
+            const auto type = getStringFromField(elem["item_type"]);
+            auto subRes = parseRow(elem);
+            if(subRes.contains("parentId") && type == kFile){
+                resultElems[subRes["parentId"]]["children"].push_back(subRes);
+            }
+            if(type == kFolder){
+                folderIds.push_back(elemId);
+            }
+            resultElems[elemId] = std::move(subRes);
         }
-        for(auto& [key, elem]: resultElems){
-            if(!elem["parentId"].IsEmpty()){
-                resultElems[elem["parentId"].As<std::string>()]["children"].(elem);
+        std::reverse(folderIds.begin(), folderIds.end());
+        for(const auto& id: folderIds){
+            const auto elemType = resultElems[id]["type"].get<std::string>();
+            if(elemType == kFile)
+                continue;
+            if(!resultElems[id]["parentId"].is_null()){
+                resultElems[resultElems[id]["parentId"].get<std::string>()]["children"].push_back(resultElems[id]);
             }
         }
+        return resultElems[resId];
     }
 
-    formats::json::Value parseRow(const storages::postgres::Row &row){
-        const auto id = row["id_string"].As<std::string>();
-        const auto type = row["item_type"].As<std::string>();
-        const auto date = row["date-time"].As<storages::postgres::TimePointTz>();
+    nlohmann::json parseRow(const storages::postgres::Row &row){
+        const auto id = getStringFromField(row["id_string"]);
+        const auto type = getStringFromField(row["item_type"]);
         const auto size = row["item_size"].As<long long>();
+        const auto datePg = row["date-time"].As<storages::postgres::TimePointTz>();
+
+        auto dateToParse = datePg.GetUnderlying();
+        const auto date = utils::datetime::LocalTimezoneTimestring(dateToParse);
 
         auto createOptional = []<class T>(const storages::postgres::Field &elem, std::optional<T> &res){
-            if(!elem.IsNull())
+            if(elem.IsNull())
+                res = std::nullopt;
+            if(std::is_same<T, std::string>())
+                res = getStringFromField(elem);
+            else
                 res = elem.As<T>();
         };
 
         std::optional<std::string> url;
         createOptional(row["url"], url);
 
-        std::optional<std::string>parentId;
+        std::optional<std::string> parentId;
         createOptional(row["parent_string"], parentId);
 
-        if(type == kFile)
-            return formats::json::MakeObject(
-                "id", id,
-                "url", url,
-                "parentId", parentId,
-                "size", size,
-                "date", date,
-                "type", type
-                );
-        else
-            return formats::json::MakeObject(
-                    "id", id,
-                    "url", url,
-                    "parentId", parentId,
-                    "size", size,
-                    "date", date,
-                    "type", type,
-                    "children", formats::json::MakeArray()
-            );
+        nlohmann::json jsonRes = {
+                {"id", id},
+                {"size", size},
+                {"date", date},
+                {"type", type},
+                {"url", url.value()},
+                {"parentId", parentId.value()}
+        };
+
+        if (type == kFolder)
+            jsonRes["children"] = nlohmann::json::array();
+
+        return jsonRes;
     }
 
     void AppendService(components::ComponentList &component_list) {

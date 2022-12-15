@@ -14,12 +14,12 @@
 #include <userver/storages/postgres/component.hpp>
 #include <userver/utils/datetime/date.hpp>
 #include <boost/algorithm/string.hpp>
-
+#include <nlohmann/json.hpp>
 using namespace userver;
 namespace yet_another_disk {
     const std::string kFolder = "FOLDER";
     const std::string kFile = "FILE";
-    const boost::uuids::string_generator uuidGen;
+    const boost::uuids::name_generator uuidGen(boost::uuids::ns::x500dn());
 
 
     bool CheckFile(const formats::json::Value &elem);
@@ -38,9 +38,9 @@ namespace yet_another_disk {
     std::optional<formats::json::Value> getItemAndChildren(const boost::uuids::uuid &uid, const std::string &id,
                                               storages::postgres::Transaction &trx);
 
-    formats::json::Value parseRes (const storages::postgres::ResultSet &res, const std::string &resId);
+    nlohmann::json parseRes (const storages::postgres::ResultSet &res, const std::string &resId);
 
-    formats::json::Value parseRow(const storages::postgres::Row &row);
+    nlohmann::json parseRow(const storages::postgres::Row &row);
 
     void UpdateParentSize(const boost::uuids::uuid &id, long long changeSize,
                           storages::postgres::Transaction &trx);

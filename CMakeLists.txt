@@ -6,7 +6,7 @@ include(GNUInstallDirs)
 
 add_subdirectory(third_party/userver)
 
-
+find_package(nlohmann_json 3.2.0 REQUIRED)
 # Common sources
 add_library(${PROJECT_NAME}_objs OBJECT
 		src/handlers.hpp
@@ -17,7 +17,7 @@ target_link_libraries(${PROJECT_NAME}_objs PUBLIC userver-core userver-postgresq
 
 # The Service
 add_executable(${PROJECT_NAME} src/main.cpp)
-target_link_libraries(${PROJECT_NAME} PRIVATE ${PROJECT_NAME}_objs)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${PROJECT_NAME}_objs nlohmann_json::nlohmann_json)
 
 
 # Unit Tests
