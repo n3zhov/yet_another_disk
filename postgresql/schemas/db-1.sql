@@ -1,3 +1,4 @@
+DROP SCHEMA IF EXISTS yet_another_disk CASCADE;
 CREATE SCHEMA IF NOT EXISTS yet_another_disk;
 
 CREATE  TABLE yet_another_disk.system_items (
@@ -17,7 +18,6 @@ CREATE  TABLE yet_another_disk.history (
                                            "date-time"          timestamptz    ,
                                            parent_id            uuid    ,
                                            item_size            bigint    ,
-                                           url                  char(255)
+                                           url                  char(255)    ,
+                                           CONSTRAINT fk_history_system_items FOREIGN KEY ( item_id ) REFERENCES yet_another_disk.system_items( id ) ON DELETE CASCADE
 );
-
-ALTER TABLE yet_another_disk.history ADD CONSTRAINT fk_history_system_items FOREIGN KEY ( item_id ) REFERENCES yet_another_disk.system_items( id ) ON DELETE CASCADE;

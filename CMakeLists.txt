@@ -3,10 +3,12 @@ project(yet_another_disk CXX)
 
 include(third_party/userver/cmake/SetupEnvironment.cmake)
 include(GNUInstallDirs)
+include(FetchContent)
+
+FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz)
+FetchContent_MakeAvailable(json)
 
 add_subdirectory(third_party/userver)
-
-find_package(nlohmann_json 3.2.0 REQUIRED)
 # Common sources
 add_library(${PROJECT_NAME}_objs OBJECT
 		src/handlers.hpp
@@ -28,7 +30,11 @@ target_link_libraries(${PROJECT_NAME}_unittest PRIVATE ${PROJECT_NAME}_objs user
 add_google_tests(${PROJECT_NAME}_unittest)
 
 
-
+# Benchmarks
+add_executable(${PROJECT_NAME}_benchmark
+		src/handlers_benchmark.cpp
+		)
+target_link_libraries(${PROJECT_NAME}_benchmark PRIVATE ${PROJECT_NAME}_objs userver-ubench)
 add_google_benchmark_tests(${PROJECT_NAME}_benchmark)
 
 # Functional Tests
