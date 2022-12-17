@@ -22,7 +22,7 @@ IMPORT_BATCHES = [
             }
         ],
         "updateDate": "2022-02-01T12:00:00+0000"
-    }, #done 1
+    },
     {
         "items": [
             {
@@ -46,7 +46,7 @@ IMPORT_BATCHES = [
             }
         ],
         "updateDate": "2022-02-02T12:00:00+0000"
-    }, #done 2
+    },
     {
         "items": [
             {
@@ -70,7 +70,7 @@ IMPORT_BATCHES = [
             }
         ],
         "updateDate": "2022-02-03T12:00:00+0000"
-    }, #done 3
+    },
     {
         "items": [
             {
