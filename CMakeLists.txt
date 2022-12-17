@@ -5,7 +5,10 @@ include(third_party/userver/cmake/SetupEnvironment.cmake)
 include(GNUInstallDirs)
 include(FetchContent)
 
-FetchContent_Declare(json URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz)
+FetchContent_Declare(json
+		GIT_REPOSITORY https://github.com/nlohmann/json
+		GIT_TAG v3.11.2
+		)
 FetchContent_MakeAvailable(json)
 
 add_subdirectory(third_party/userver)
@@ -14,12 +17,12 @@ add_library(${PROJECT_NAME}_objs OBJECT
 		src/handlers.hpp
 		src/handlers.cpp
         )
-target_link_libraries(${PROJECT_NAME}_objs PUBLIC userver-core userver-postgresql)
+target_link_libraries(${PROJECT_NAME}_objs PUBLIC userver-core userver-postgresql nlohmann_json::nlohmann_json)
 
 
 # The Service
 add_executable(${PROJECT_NAME} src/main.cpp)
-target_link_libraries(${PROJECT_NAME} PRIVATE ${PROJECT_NAME}_objs nlohmann_json::nlohmann_json)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${PROJECT_NAME}_objs)
 
 
 # Unit Tests
