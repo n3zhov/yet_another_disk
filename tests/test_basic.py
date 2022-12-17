@@ -188,15 +188,18 @@ async def test_imports(service_client):
         print(f"Importing batch {index}")
         response = await service_client.post("/imports", json=batch)
 
-        assert response.status == 200, f"Expected HTTP status code 200, got {response.status}"
+        assert response.status == 200, \
+            f"Expected HTTP status code 200, got {response.status}"
 
     response = await service_client.get(f"/nodes/{ROOT_ID}")
 
     json_response = json.loads(response.text)
     deep_sort_children(json_response)
     deep_sort_children(EXPECTED_TREE)
-    assert response.status == 200, f"Expected HTTP status code 200, got {response.status}"
-    assert json_response == EXPECTED_TREE, "Expected tree doesn't match result of imports/nodes"
+    assert response.status == 200, \
+        f"Expected HTTP status code 200, got {response.status}"
+    assert json_response == EXPECTED_TREE, \
+        "Expected tree doesn't match result of imports/nodes"
 
 
 async def test_db_delete(service_client):
@@ -204,12 +207,16 @@ async def test_db_delete(service_client):
         print(f"Importing batch {index}")
         response = await service_client.post("/imports", json=batch)
 
-        assert response.status == 200, f"Expected HTTP status code 200, got {response.status}"
-    response = await service_client.delete(f'/delete/{ROOT_ID}', params={'date': '2022-06-26T21:12:01.000Z'})
+        assert response.status == 200, \
+            f"Expected HTTP status code 200, got {response.status}"
+
+    response = await service_client.delete(f'/delete/{ROOT_ID}',
+                                           params={'date': '2022-06-26T21:12:01.000Z'})
     assert response.status == 200
 
     response = await service_client.get(f'/nodes/{ROOT_ID}')
-    assert response.status == 404, f"Expected HTTP status code 404, got {response.status}"
+    assert response.status == 404, \
+        f"Expected HTTP status code 404, got {response.status}"
 
 
 @pytest.mark.pgsql('db-1', files=['initial_data.sql'])
@@ -218,5 +225,7 @@ async def test_db_initial_data(service_client):
     json_response = json.loads(response.text)
     deep_sort_children(json_response)
     deep_sort_children(EXPECTED_TREE)
-    assert response.status == 200, f"Expected HTTP status code 200, got {response.status}"
-    assert json_response == EXPECTED_TREE, "Expected tree doesn't match result of imports/nodes"
+    assert response.status == 200, \
+        f"Expected HTTP status code 200, got {response.status}"
+    assert json_response == EXPECTED_TREE, \
+        "Expected tree doesn't match result of imports/nodes"
