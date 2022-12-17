@@ -5,7 +5,6 @@ import subprocess
 import sys
 from testsuite.databases import pgsql
 
-
 # Start the tests via `make test-debug` or `make test-release`
 
 API_BASEURL = "http://localhost:8080"
@@ -210,8 +209,10 @@ async def test_db_delete(service_client):
         assert response.status == 200, \
             f"Expected HTTP status code 200, got {response.status}"
 
-    response = await service_client.delete(f'/delete/{ROOT_ID}',
-                                           params={'date': '2022-06-26T21:12:01.000Z'})
+    response = \
+        await service_client.delete(f'/delete/{ROOT_ID}',
+                                    params={'date':
+                                            '2022-06-26T21:12:01.000Z'})
     assert response.status == 200
 
     response = await service_client.get(f'/nodes/{ROOT_ID}')
